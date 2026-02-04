@@ -1,0 +1,122 @@
+#include <MD_Parola.h>
+#include <MD_MAX72XX.h>
+#include <SPI.h>
+
+/* ---------- LED MATRIX SETTINGS ---------- */
+#define HARDWARE_TYPE MD_MAX72XX::PAROLA_HW
+#define MAX_DEVICES 4
+#define DATA_PIN 10
+#define CLK_PIN 13
+#define CS_PIN 11
+
+/* ---------- BUTTON PINS (SAME AS OR VERSION) ---------- */
+#define BUTTON_F_PIN      2   // Input B (F)
+#define BUTTON_T_PIN      3   // Input A (T)
+#define BUTTON_NEGATE_PIN 4   // NOT
+#define BUTTON_OR_PIN     5   // Clear display
+
+MD_Parola display(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+
+/* ---------- DISPLAY STATE ---------- */
+char currentChar = '\0';
+
+/* ---------- DEBOUNCE VARIABLES ---------- */
+const unsigned long debounceDelay = 50;
+unsigned long lastDebounceF = 0;
+unsigned long lastDebounceT = 0;
+unsigned long lastDebounceN = 0;
+unsigned long lastDebounceO = 0;
+
+int stateF = HIGH;
+int stateT = HIGH;
+int stateN = HIGH;
+int stateO = HIGH;
+
+void setup() {
+  pinMode(BUTTON_F_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_T_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_NEGATE_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_OR_PIN, INPUT_PULLUP);
+
+  display.begin(MAX_DEVICES);
+  display.setIntensity(5);
+  display.displayClear();
+
+  // One zone per LED matrix
+  for (int i = 0; i < MAX_DEVICES; i++) {
+    display.setZone(i, i, i);
+  }
+}
+
+void loop() {
+
+  /* ---------- READ BUTTONS ---------- */
+  int rawF = digitalRead(BUTTON_F_PIN);
+  int rawT = digitalRead(BUTTON_T_PIN);
+  int rawN = digitalRead(BUTTON_NEGATE_PIN);
+  int rawO = digitalRead(BUTTON_OR_PIN);
+
+  /* ---------- DEBOUNCE ---------- */
+  if (rawF != stateF && millis() - lastDebounceF > debounceDelay) {
+    stateF = rawF;
+    lastDebounceF = millis();
+  }
+
+  if (rawT != stateT && millis() - lastDebounceT > debounceDelay) {
+    stateT = rawT;
+    lastDebounceT = millis();
+  }
+
+  if (rawN != stateN && millis() - lastDebounceN > debounceDelay) {
+    stateN = rawN;
+    lastDebounceN = millis();
+  }
+
+  if (rawO != stateO && millis() - lastDebounceO > debounceDelay) {
+    stateO = rawO;
+    lastDebounceO = millis();
+  }
+
+  char newChar = currentChar;
+
+  /* ---------- AND LOGIC GATE ---------- */
+
+  // OR button used only to clear display
+  if (stateO == LOW) {
+    newChar = '\0';
+  }
+  else {
+    // Button pressed = TRUE
+    bool inputA = (stateT == LOW); // T button
+    bool inputB = (stateF == LOW); // F button
+
+    // AND operation
+    bool result = inputA && inputB;
+
+    // Apply NOT if negate button pressed
+    if (stateN == LOW) {
+      result = !result;
+    }
+
+    // Output result
+    newChar = result ? 'T' : 'F';
+  }
+
+  /* ---------- UPDATE DISPLAY ---------- */
+  if (newChar != currentChar) {
+    display.displayClear();
+
+    if (newChar != '\0') {
+      char buf[2] = { newChar, '\0' };
+      for (int i = 0; i < MAX_DEVICES; i++) {
+        display.displayZoneText(
+          i, buf, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT
+        );
+      }
+    }
+
+    currentChar = newChar;
+  }
+
+  display.displayAnimate();
+}
