@@ -1,0 +1,148 @@
+#include "LedControl.h"
+
+// MAX7219 Pins
+const int DIN_PIN = 11;
+const int CS_PIN  = 10;
+const int CLK_PIN = 13;
+
+LedControl lc = LedControl(DIN_PIN, CLK_PIN, CS_PIN, 1);
+
+// Input A
+const int GREEN_A_PIN = 2;
+const int RED_A_PIN   = 4;
+const int BLUE_A_PIN  = 7; // NOT A
+
+// Input B
+const int GREEN_B_PIN  = 3;
+const int RED_B_PIN    = 5;
+const int YELLOW_B_PIN = 6; // NOT B
+
+// Logic gate buttons
+const int AND_PIN     = A5;
+const int XOR_PIN     = A4;
+const int OR_PIN      = A3;
+const int IF_THEN_PIN = A2;
+const int IFF_PIN     = A1;
+
+// Digits to display on matrix
+byte digit0[8] = {
+  B00111100,
+  B01000010,
+  B01000010,
+  B01000010,
+  B01000010,
+  B01000010,
+  B00111100,
+  B00000000
+};
+
+byte digit1[8] = {
+  B00010000,
+  B00110000,
+  B00010000,
+  B00010000,
+  B00010000,
+  B00010000,
+  B00111000,
+  B00000000
+};
+
+bool A = false;
+bool B = false;
+
+void setup() {
+  Serial.begin(9600);
+
+  // Setup LED Matrix
+  lc.shutdown(0, false);
+  lc.setIntensity(0, 8);
+  lc.clearDisplay(0);
+
+  // Input buttons
+  pinMode(GREEN_A_PIN, INPUT_PULLUP);
+  pinMode(RED_A_PIN, INPUT_PULLUP);
+  pinMode(BLUE_A_PIN, INPUT_PULLUP);
+
+  pinMode(GREEN_B_PIN, INPUT_PULLUP);
+  pinMode(RED_B_PIN, INPUT_PULLUP);
+  pinMode(YELLOW_B_PIN, INPUT_PULLUP);
+
+  // Logic gate buttons
+  pinMode(AND_PIN, INPUT_PULLUP);
+  pinMode(OR_PIN, INPUT_PULLUP);
+  pinMode(XOR_PIN, INPUT_PULLUP);
+  pinMode(IF_THEN_PIN, INPUT_PULLUP);
+  pinMode(IFF_PIN, INPUT_PULLUP);
+
+  Serial.println("System Ready!");
+}
+
+void loop() {
+  // --- Handle A ---
+  if (digitalRead(RED_A_PIN) == LOW) {
+    A = false;
+    Serial.println("A = FALSE");
+  } else if (digitalRead(GREEN_A_PIN) == LOW) {
+    A = true;
+    Serial.println("A = TRUE");
+  } else if (digitalRead(BLUE_A_PIN) == LOW) {
+    A = !A;
+    Serial.println("A = NOT A");
+    delay(300); // debounce
+  }
+
+  // --- Handle B ---
+  if (digitalRead(RED_B_PIN) == LOW) {
+    B = false;
+    Serial.println("B = FALSE");
+  } else if (digitalRead(GREEN_B_PIN) == LOW) {
+    B = true;
+    Serial.println("B = TRUE");
+  } else if (digitalRead(YELLOW_B_PIN) == LOW) {
+    B = !B;
+    Serial.println("B = NOT B");
+    delay(300); // debounce
+  }
+
+  // Logic gate result
+  bool result = false;
+  bool gatePressed = false;
+
+  if (digitalRead(AND_PIN) == LOW) {
+    result = A && B;
+    gatePressed = true;
+    Serial.println("AND selected");
+  } else if (digitalRead(OR_PIN) == LOW) {
+    result = A ; B  // A → B
+    ; gatePressed = true;
+    Serial.println("IF-THEN selected");
+  } else if (digitalRead(IFF_PIN) == LOW) {
+    result = (A == B);  // A ↔️ B
+    gatePressed = true;
+    Serial.println("IF AND ONLY IF selected");
+  }
+
+  // Show result
+  if (gatePressed) {
+    if (result) {
+      displayDigit(digit1);
+      Serial.println("Result: 1");
+    } else {
+      displayDigit(digit0);
+      Serial.println("Result: 0");
+    }
+  } else {
+    lc.clearDisplay(0);  // no gate pressed
+  }
+
+  delay(100);
+}
+
+// Helper to show digit on matrix
+void displayDigit(byte digit[8]) {
+  for (int i = 0; i < 8; i++) {
+    lc.setRow(0, i, digit[i]);
+  }
+}
+
+
