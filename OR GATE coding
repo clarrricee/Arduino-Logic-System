@@ -1,0 +1,179 @@
+#include <MD_Parola.h>
+#include <MD_MAX72XX.h>
+#include <SPI.h>
+
+/* ---------- LED MATRIX SETTINGS ---------- */
+#define HARDWARE_TYPE MD_MAX72XX::PAROLA_HW
+#define MAX_DEVICES   4        // Total LED matrix modules
+#define DATA_PIN      10       // DATA pin
+#define CLK_PIN       13       // CLOCK pin
+#define CS_PIN        11       // CHIP SELECT pin
+
+/* ---------- BUTTON PINS ---------- */
+#define BUTTON_F_PIN      2    // Button F
+#define BUTTON_T_PIN      3    // Button T
+#define BUTTON_NEGATE_PIN 4    // Negate button (double click = reset)
+#define BUTTON_OR_PIN     5    // OR button (single press = clear)
+
+/* ---------- DISPLAY OBJECT ---------- */
+MD_Parola display(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+
+/* ---------- DISPLAY STATE ---------- */
+// Character currently shown on LED
+// '\0' means nothing is displayed
+char currentDisplayedChar = '\0';
+
+/* ---------- DEBOUNCE VARIABLES ---------- */
+unsigned long lastDebounceTime_F = 0;
+unsigned long lastDebounceTime_T = 0;
+unsigned long lastDebounceTime_Negate = 0;
+unsigned long lastDebounceTime_Or = 0;
+
+const unsigned long debounceDelay = 50; // debounce time in ms
+
+// Stable button states (HIGH = not pressed, LOW = pressed)
+int stable_F_state = HIGH;
+int stable_T_state = HIGH;
+int stable_Negate_state = HIGH;
+int stable_Or_state = HIGH;
+
+/* ---------- DOUBLE CLICK VARIABLES ---------- */
+unsigned long lastClickTime_F = 0;
+unsigned long lastClickTime_T = 0;
+unsigned long lastClickTime_Negate = 0;
+
+int clickCount_F = 0;
+int clickCount_T = 0;
+int clickCount_Negate = 0;
+
+const unsigned long doubleClickInterval = 400; // max time between clicks
+
+void setup() {
+  // Set button pins as input with internal pull-up
+  pinMode(BUTTON_F_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_T_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_NEGATE_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_OR_PIN, INPUT_PULLUP);
+
+  // Start LED display
+  display.begin(MAX_DEVICES);
+  display.setIntensity(5);     // Brightness level
+  display.displayClear();      // Clear display at start
+
+  // Assign each LED module to its own zone
+  for (uint8_t z = 0; z < MAX_DEVICES; z++) {
+    display.setZone(z, z, z);
+  }
+}
+
+void loop() {
+
+  /* ---------- READ RAW BUTTON STATES ---------- */
+  int rawF = digitalRead(BUTTON_F_PIN);
+  int rawT = digitalRead(BUTTON_T_PIN);
+  int rawN = digitalRead(BUTTON_NEGATE_PIN);
+  int rawO = digitalRead(BUTTON_OR_PIN);
+
+  /* ---------- DEBOUNCE BUTTONS ---------- */
+  if (rawF != stable_F_state && millis() - lastDebounceTime_F > debounceDelay) {
+    stable_F_state = rawF;
+    lastDebounceTime_F = millis();
+  }
+
+  if (rawT != stable_T_state && millis() - lastDebounceTime_T > debounceDelay) {
+    stable_T_state = rawT;
+    lastDebounceTime_T = millis();
+  }
+
+  if (rawN != stable_Negate_state && millis() - lastDebounceTime_Negate > debounceDelay) {
+    stable_Negate_state = rawN;
+    lastDebounceTime_Negate = millis();
+  }
+
+  if (rawO != stable_Or_state && millis() - lastDebounceTime_Or > debounceDelay) {
+    stable_Or_state = rawO;
+    lastDebounceTime_Or = millis();
+  }
+
+  // Keep current display unless logic changes it
+  char calculatedChar = currentDisplayedChar;
+
+  /* ---------- DOUBLE CLICK DETECTION ---------- */
+  if (rawF == LOW && stable_F_state == HIGH) {
+    clickCount_F = (millis() - lastClickTime_F < doubleClickInterval) ? 2 : 1;
+    lastClickTime_F = millis();
+  }
+
+  if (rawT == LOW && stable_T_state == HIGH) {
+    clickCount_T = (millis() - lastClickTime_T < doubleClickInterval) ? 2 : 1;
+    lastClickTime_T = millis();
+  }
+
+  if (rawN == LOW && stable_Negate_state == HIGH) {
+    clickCount_Negate = (millis() - lastClickTime_Negate < doubleClickInterval) ? 2 : 1;
+    lastClickTime_Negate = millis();
+  }
+
+  /* ---------- DISPLAY LOGIC (PRIORITY ORDER) ---------- */
+
+  // Double-click Negate → Reset display
+  if (clickCount_Negate == 2) {
+    calculatedChar = '\0';
+    clickCount_Negate = clickCount_F = clickCount_T = 0;
+  }
+
+  // F + T + OR pressed → display T
+  else if (stable_F_state == LOW && stable_T_state == LOW && stable_Or_state == LOW) {
+    calculatedChar = 'T';
+  }
+
+  // Double-click T → display T
+  else if (clickCount_T == 2) {
+    calculatedChar = 'T';
+    clickCount_T = 0;
+  }
+
+  // Double-click F → display F
+  else if (clickCount_F == 2) {
+    calculatedChar = 'F';
+    clickCount_F = 0;
+  }
+
+  // OR only → clear display
+  else if (stable_Or_state == LOW && stable_F_state == HIGH && stable_T_state == HIGH) {
+    calculatedChar = '\0';
+  }
+
+  // T only (with optional Negate)
+  else if (stable_T_state == LOW && stable_F_state == HIGH && stable_Or_state == HIGH) {
+    calculatedChar = (stable_Negate_state == LOW) ? 'F' : 'T';
+  }
+
+  // F only (with optional Negate)
+  else if (stable_F_state == LOW && stable_T_state == HIGH && stable_Or_state == HIGH) {
+    calculatedChar = (stable_Negate_state == LOW) ? 'T' : 'F';
+  }
+
+  // F + T only → display T
+  else if (stable_F_state == LOW && stable_T_state == LOW && stable_Or_state == HIGH) {
+    calculatedChar = 'T';
+  }
+
+  /* ---------- UPDATE LED DISPLAY ---------- */
+  if (calculatedChar != currentDisplayedChar) {
+    display.displayClear();
+
+    // Show character on all LED modules
+    if (calculatedChar != '\0') {
+      char buf[2] = {calculatedChar, '\0'};
+      for (int i = 0; i < MAX_DEVICES; i++) {
+        display.displayZoneText(i, buf, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      }
+    }
+
+    currentDisplayedChar = calculatedChar;
+  }
+
+  // Required for MD_Parola animation handling
+  display.displayAnimate();
+}
